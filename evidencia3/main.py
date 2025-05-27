@@ -1,133 +1,159 @@
-class SymbolTable:
-    def __init__(self):
-        self.global_scope = {}  # Diccionario para el ámbito global
-        self.functions = {}     # Diccionario para funciones
-        self.current_scope = self.global_scope
-        self.scope_stack = [self.global_scope]
-class VariableSymbol:
-    def __init__(self, name, type, scope, line_declared):
-        self.name = name
-        self.type = type
-        self.scope = scope
-        self.line = line_declared
+from sintactico_NEW_C import nodoPadre
 
-class FunctionSymbol:
-    def __init__(self, name, return_type, parameters, line_declared):
-        self.name = name
-        self.return_type = return_type
-        self.parameters = parameters  # Lista de tuples (nombre, tipo)
-        self.line = line_declared
-        self.local_vars = {}  # Variables locales
-class SymbolTable:
-    # ... (continuación de la clase anterior)
-    
-    def add_variable(self, name, var_type, line):
-        if name in self.current_scope:
-            raise SymbolAlreadyDefinedError(f"Variable '{name}' ya está definida en este ámbito")
-        self.current_scope[name] = VariableSymbol(name, var_type, self.current_scope_name(), line)
-    
-    def add_function(self, name, return_type, parameters, line):
-        if name in self.functions:
-            raise SymbolAlreadyDefinedError(f"Función '{name}' ya está definida")
-        self.functions[name] = FunctionSymbol(name, return_type, parameters, line)
-        # Entramos al ámbito de la función
-        self.enter_scope(name)
-    
-    def lookup_variable(self, name):
-        # Busca en los ámbitos desde el actual hacia afuera
-        for scope in reversed(self.scope_stack):
-            if name in scope:
-                return scope[name]
-        return None
-    
-    def lookup_function(self, name):
-        return self.functions.get(name)
-    
-    def enter_scope(self, function_name):
-        if function_name in self.functions:
-            new_scope = self.functions[function_name].local_vars
-            self.scope_stack.append(new_scope)
-            self.current_scope = new_scope
-    
-    def exit_scope(self):
-        if len(self.scope_stack) > 1:  # No salir del ámbito global
-            self.scope_stack.pop()
-            self.current_scope = self.scope_stack[-1]
-    
-    def current_scope_name(self):
-        if len(self.scope_stack) > 1:
-            # El ámbito actual es una función
-            for name, func in self.functions.items():
-                if func.local_vars is self.current_scope:
-                    return name
-        return "global"
+print("\n")
 
-def build_symbol_table(node, symbol_table):
-    if node is None:
-        return
-    
-    # Registro de funciones
-    if node.type == "function_declaration":
-        func_name = node.children[1].value  # Nombre de la función
-        return_type = node.children[0].children[0].value  # Tipo de retorno
-        
-        # Procesar parámetros
-        params = []
-        params_node = node.children[3]  # Nodo de parámetros
-        if params_node.children:
-            for param in params_node.children:
-                param_type = param.children[0].children[0].value
-                param_name = param.children[1].value
-                params.append((param_name, param_type))
-        
-        # Registrar función
-        symbol_table.add_function(func_name, return_type, params, node.line)
-        
-        # Registrar parámetros como variables
-        for param_name, param_type in params:
-            symbol_table.add_variable(param_name, param_type, node.line)
-        
-        # Procesar cuerpo de la función
-        build_symbol_table(node.children[5], symbol_table)  # Bloque de la función
-        
-        # Salir del ámbito de la función
-        symbol_table.exit_scope()
-    
-    # Registro de variables globales
-    elif node.type == "global_variable_declaration":
-        var_type = node.children[0].children[0].value
-        var_name = node.children[1].value
-        symbol_table.add_variable(var_name, var_type, node.line)
-    
-    # Verificación de uso de variables
-    elif node.type == "variable_reference":
-        var_name = node.children[0].value
-        if not symbol_table.lookup_variable(var_name):
-            raise UndefinedVariableError(f"Variable '{var_name}' no definida")
-    
-    # Verificación de llamadas a funciones
-    elif node.type == "function_call":
-        func_name = node.children[0].value
-        if not symbol_table.lookup_function(func_name):
-            raise UndefinedFunctionError(f"Función '{func_name}' no definida")
-    
-    # Procesar hijos recursivamente
-    for child in node.children:
-        build_symbol_table(child, symbol_table)
-class SemanticError(Exception):
+class SymbolAlreadyDefinedError(Exception):
     def __init__(self, message, line=None):
         self.message = message
         self.line = line
         super().__init__(f"Error semántico (línea {line}): {message}" if line else f"Error semántico: {message}")
 
-class SymbolAlreadyDefinedError(SemanticError):
-    pass
+class UndefinedVariableError(Exception):
+    def __init__(self, message, line=None):
+        self.message = message
+        self.line = line
+        super().__init__(f"Error semántico (línea {line}): {message}" if line else f"Error semántico: {message}")
 
-class UndefinedVariableError(SemanticError):
-    pass
+class SymbolTable:
+    def __init__(self):
+        self.symbols = []
+        self.functions = set()
+        self.current_scope = "global"
+        self.scope_stack = ["global"]
 
-class UndefinedFunctionError(SemanticError):
-    pass
+    def insert(self, data_type, name, scope, is_function=True, line=None):
+        symbol = {
+            'data_type': data_type,
+            'name': name,
+            'scope': scope,
+            'is_function': is_function,
+            'line': line
+        }
+        self.symbols.append(symbol)
+        if is_function:
+            self.functions.add(name)
 
-class TypeMismatchError(SemanticError):
-    pass
+    def lookup(self, name, scope=None):
+        if scope is None:
+            scope = self.current_scope
+        
+        # Buscar en el ámbito actual primero
+        for symbol in reversed(self.symbols):
+            if symbol['name'] == name and symbol['scope'] == scope:
+                return symbol
+        
+        # Si no se encuentra, buscar en ámbitos superiores
+        if scope != "global":
+            for symbol in self.symbols:
+                if symbol['name'] == name and symbol['scope'] == "global":
+                    return symbol
+        return None
+
+    def enter_scope(self, function_name):
+        self.scope_stack.append(function_name)
+        self.current_scope = function_name
+
+    def exit_scope(self):
+        if len(self.scope_stack) > 1:
+            self.scope_stack.pop()
+            self.current_scope = self.scope_stack[-1]
+
+def registrar_en_tabla(nodo, symbol_table, scope="global"):
+    if nodo is None:
+        return
+
+    # Obtener línea (si está disponible en el nodo)
+    line = getattr(nodo, 'linea', None)
+
+    # Registrar funciones
+    if getattr(nodo, 'simbolo_lexer', None) == "FUNCTION":
+        try:
+            tipo_nodo = nodo.children[0].children[0].children[0].valor
+            function_name = nodo.children[2].valor
+            
+            if symbol_table.lookup(function_name, "global"):
+                raise SymbolAlreadyDefinedError(f"La función '{function_name}' ya está definida", line)
+            
+            symbol_table.insert(tipo_nodo, function_name, "global", True, line)
+            symbol_table.enter_scope(function_name)
+            
+            # Registrar parámetros
+            if len(nodo.children) > 3:  # Asumiendo que los parámetros están en children[3]
+                parametros_node = nodo.children[3]
+                for child in parametros_node.children:
+                    if getattr(child, 'simbolo_lexer', None) == "TI":
+                        param_type = child.children[0].children[0].children[0].valor
+                        param_name = child.children[1].valor
+                        if symbol_table.lookup(param_name, function_name):
+                            raise SymbolAlreadyDefinedError(f"El parámetro '{param_name}' ya está definido", line)
+                        symbol_table.insert(param_type, param_name, function_name, False, line)
+            
+            # Procesar el cuerpo de la función
+            for child in nodo.children[4:]:  # Asumiendo que el cuerpo está después de los parámetros
+                registrar_en_tabla(child, symbol_table, function_name)
+            
+            symbol_table.exit_scope()
+            return  # Salir después de procesar la función para evitar procesar hijos nuevamente
+        
+        except IndexError as e:
+            raise SyntaxError(f"Error al procesar la función: estructura incorrecta. {str(e)}")
+
+    # Registrar variables
+    elif getattr(nodo, 'simbolo_lexer', None) == "Crear_variables":
+        try:
+            tipo_nodo = nodo.children[0].children[0].children[0].valor
+            var_name = nodo.children[1].valor
+            
+            if symbol_table.lookup(var_name, scope):
+                raise SymbolAlreadyDefinedError(f"La variable '{var_name}' ya está definida en este ámbito", line)
+            
+            symbol_table.insert(tipo_nodo, var_name, scope, False, line)
+        except IndexError as e:
+            raise SyntaxError(f"Error al procesar declaración de variable: estructura incorrecta. {str(e)}")
+
+    # Verificar uso de variables/funciones
+    elif getattr(nodo, 'simbolo_lexer', None) in ["FH", "F'", "TX", "sentencia"]:
+        for child in nodo.children:
+            if getattr(child, 'simbolo_lexer', None) == "ID":
+                var_name = child.valor
+                found = symbol_table.lookup(var_name, scope)
+                
+                # Verificar si es una llamada a función
+                is_function_call = False
+                if len(child.children) > 0:
+                    first_child = child.children[0]
+                    if getattr(first_child, 'simbolo_lexer', None) == "PARENTESIS_ABIERTO":
+                        is_function_call = True
+                
+                if is_function_call:
+                    if var_name not in symbol_table.functions:
+                        raise UndefinedVariableError(f"Función '{var_name}' no definida", line)
+                elif not found:
+                    raise UndefinedVariableError(f"Variable '{var_name}' no definida", line)
+
+    # Procesar hijos recursivamente
+    for child in nodo.children:
+        registrar_en_tabla(child, symbol_table, scope)
+
+# Crear y poblar la tabla de símbolos
+symbol_table = SymbolTable()
+
+try:
+    registrar_en_tabla(nodoPadre, symbol_table)
+
+    # Mostrar resultados
+    print("\nTabla de Símbolos:")
+    print(f"{'Tipo':<10} | {'Nombre':<15} | {'Ámbito':<15} | {'Tipo':<10} | {'Línea':<5}")
+    print("-" * 60)
+    for symbol in symbol_table.symbols:
+        data_type = symbol['data_type'] or 'N/A'
+        name = symbol['name']
+        scope = symbol['scope']
+        kind = "Función" if symbol['is_function'] else "Variable"
+        line = symbol.get('line', 'N/A')
+        print(f"{data_type:<10} | {name:<15} | {scope:<15} | {kind:<10} | {line:<5}")
+
+except (SymbolAlreadyDefinedError, UndefinedVariableError) as e:
+    print(f"\n{e}")
+except Exception as e:
+    print(f"\nError inesperado: {str(e)}")
